@@ -1,11 +1,21 @@
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
 	"index/suffixarray"
+	"log"
 	"math/rand"
+	"os"
+	"strconv"
 	"time"
 )
+
+// https://coderwall.com/p/cp5fya/measuring-execution-time-in-go
+func timeTrack(start time.Time, name string) {
+	elapsed := time.Since(start)
+	log.Printf("%s took %s", name, elapsed)
+}
 
 // Returns: Sum of elements in `arr`
 func sum(arr []int) int {
@@ -16,16 +26,13 @@ func sum(arr []int) int {
 	return s
 }
 
-func test_sa_speed(P int) {
-	const (
-		T = 2e7 // Max size of text
-		// P = 100  	// Size of repeated substrings in text
-		L = 1e9 // (Size of text) x (number of test runs)
-		R = 2   // 1 / R = fraction of text made up of pattern repetitions
-	)
-
-	fmt.Printf("Test suffix array speed: text=%e chars, pattern=%d chars, %e matches\n",
-		T, P, T/R)
+// T int, // size of text
+// P int, // size of pattern.
+func make_pattern_text(T int, // size of text
+	P int, // size of pattern.
+	R int, // 1 / R = fraction of text made up of pattern repetitions
+) ([]byte, []byte) {
+	// ([]byte, []byte)
 
 	text := make([]byte, T, T)    // String to be indexed and searched
 	pattern := make([]byte, P, P) // Substring to search for
@@ -41,62 +48,104 @@ func test_sa_speed(P int) {
 		k := 1 + byte(rand.Int31n(0xFE))
 		text[i+j] += k
 	}
+	return pattern, text
+}
 
-	// di := -1
-	// var dvp, dvt byte
-	// for j := 0; j < P; j++ {
-	// 	if pattern[j] != text[P + j] {
-	// 		di = j
-	// 		dvp = pattern[j]
-	// 		dvt = text[P + j]
-	// 		break
-	// 	}
-	// }
+const MAX_TIME = 10
 
-	// fmt.Printf("diff: j=%d,dvp=%d,dvt=%d\n", di, dvp, dvt)
-	// fmt.Println(pattern[:10])
-	// fmt.Println(text[P:P + 10])
+func test_sa_speed(T int, // size of text
+	P int, // size of pattern.
+	R int, // 1 / R = fraction of text made up of pattern repetitions
+) (float64, float64) {
 
-	for n := P * R; n <= T; n *= 10 {
-		fmt.Printf("%9d", n)
-		//start0 := time.Now()
-		text_index := suffixarray.New(text[:n])
-		fmt.Printf(": ")
-		n_repeats := L / n // number of test repeats
-		if n_repeats < 1 {
-			n_repeats = 1
-		}
+	M := int(T / (P * R))
+	fmt.Printf("Test suffix array speed: T=%v, P=%v, R=%v, M=%v\n",
+		T, P, R, M)
+	if M <= 0 {
+		panic("M must be greater than zero")
+	}
 
-		matches := []int{} // number of pattern matches
-		start := time.Now()
-		for i := 0; i < n_repeats; i++ {
-			offsets := text_index.Lookup(pattern, -1)
-			matches = append(matches, len(offsets))
-		}
+	// text:  String to be indexed and searched
+	// pattern:  Substring to search for
+	pattern, text := make_pattern_text(T, P, R)
 
-		//duration_total := time.Since(start0).Seconds()
+	var (
+		count int
+		start time.Time
+	)
 
-		duration := time.Since(start).Seconds() / float64(n_repeats)
-		//duration := time.Since(start).Seconds() / float64(n_repeats) // Duration per repeat
+	var text_index *suffixarray.Index
+	count = 0
+	for start = time.Now(); time.Since(start).Seconds() < MAX_TIME; {
+		text_index = suffixarray.New(text[:])
+		count++
+	}
+	if count < 1 {
+		panic("Count index")
+	}
+	duration_index := time.Since(start).Seconds() / float64(count)
+	fmt.Printf(" count=%d,dt_index=%.1f,duration_index=%g\n",
+		count, time.Since(start).Seconds(), duration_index)
 
-		n_matches := sum(matches) / len(matches)
-		if n_matches*R*P != n {
-			msg := fmt.Sprintf("Unexpected number of matches: n_matches=%d, n / (R * P)=%d (%d / %d %d)",
-				n_matches, n/(R*P), sum(matches), len(matches), n_repeats)
+	matches := []int{} // number of pattern matches
+	count = 0
+	for start = time.Now(); time.Since(start).Seconds() < MAX_TIME; {
+		offsets := text_index.Lookup(pattern, -1)
+		if len(offsets) != M {
+			var msg string
+			fmt.Sprintf(msg, "%d matched, expected %d", len(offsets), M)
 			panic(msg)
 		}
-
-		duration_match := duration / float64(n_matches) // Duration per pattern match
-		duration_char := duration_match / float64(P)
-
-		fmt.Printf("%7d %e %e %e %e\n", n_matches, duration, duration_match, duration_char,
-			duration/float64(n))
-		//duration_all, duration_total)
+		matches = append(matches, len(offsets))
+		count++
 	}
+	if count < 1 {
+		panic("Count lookup")
+	}
+	duration_lookup_total := time.Since(start).Seconds()
+	duration_lookup := duration_lookup_total / float64(count)
+	fmt.Printf(" count=%d,dt_lookup=%.1f, duration_lookup=%g\n",
+		count, duration_lookup_total, duration_lookup)
+
+	n_matches := sum(matches)
+	if n_matches < 1 {
+		panic("matches")
+	}
+
+	duration_match := duration_lookup_total / float64(n_matches) // Duration per pattern match
+	duration_char := duration_match / float64(P)
+
+	fmt.Printf(" %7d %e %e %e\n", n_matches, duration_lookup, duration_match, duration_char)
+
+	return duration_index, duration_lookup
 }
 
 func main() {
+	R := 2
+	T := 10 << 7
+	results := [][]float64{}
 	for P := 10; P <= 10*1000; P += 10 {
-		test_sa_speed(P)
+		duration_index, duration_lookup := test_sa_speed(T, P, R)
+		results = append(results,
+			[]float64{float64(T), float64(P), duration_index, duration_lookup})
+	}
+
+	w := csv.NewWriter(os.Stdout)
+
+	for _, record := range results {
+		rec := []string{}
+		for _, v := range record {
+			rec = append(rec, strconv.FormatFloat(v, 'g', -1, 64))
+		}
+		if err := w.Write(rec); err != nil {
+			log.Fatalln("error writing record to csv:", err)
+		}
+	}
+
+	// Write any buffered data to the underlying writer (standard output).
+	w.Flush()
+
+	if err := w.Error(); err != nil {
+		log.Fatal(err)
 	}
 }
