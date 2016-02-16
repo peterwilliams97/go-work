@@ -36,61 +36,44 @@ func min(a, b int) int {
 // P int, // size of pattern.
 func make_pattern_text(T int, // size of text
 	P int, // size of pattern.
-	R int, // 1 / R = fraction of text made up of pattern repetitions
+	N int, // number of pattern repetitions
 ) ([]byte, []byte) {
-	// ([]byte, []byte)
 
-	M := int(T / (P * R))
+	M := int(T / P) // Max # patterns that fit in text
+	if M < N {
+		panic(fmt.Sprintf("make_pattern_text M < N. T=%d,P=%d,N=%d,M=%d", T, P, N, M))
+	}
+	D := int(M / N) // Distance between filled pattern slots
 
 	text := make([]byte, T, T)    // String to be indexed and searched
 	pattern := make([]byte, P, P) // Substring to search for
+	unpattern := make([]byte, P, P)
 
 	for j := 0; j < P; j++ {
-		pattern[j] = byte(j%0xFF + 1)
+		pattern[j] = byte(j%0xFD + 1)
 	}
+	for j := 0; j < P-1; j++ {
+		unpattern[j] = byte(j%0xFD + 1)
+	}
+	unpattern[P-1] = 0xFF
+
 	// for j := P - 10; j < P; j++ {
 	// 	fmt.Printf("%5d: %3d\n", j, pattern[j])
 	// }
 
+	n := 0
 	for m := 0; m < M; m++ {
-		t0 := m * P * R
+		t0 := m * P
+		var pat []byte
+		if m%D == 0 && n < N {
+			pat = pattern
+			n++
+		} else {
+			pat = unpattern
+		}
 		for j := 0; j < P; j++ {
-			text[t0+j] = pattern[j]
+			text[t0+j] = pat[j]
 		}
-		for r := 1; r < R; r++ {
-			t1 := t0 + P*r
-			//text[t1+P-1] = pattern[P-1] + 1
-			for j := 0; j < P-1; j++ {
-				text[t1+j] = pattern[j]
-			}
-			//text[t1+P-1] = pattern[P-1] + 1
-			// 	for j := P - 10; j < P; j++ {
-			// 		fmt.Printf("%5d: %3d %3d\n", j, pattern[j], text[t1+j])
-			// 	}
-			// 	fmt.Printf("t0=%v, t1=%v\n", t0, t1)
-			// 	panic("!!!!")
-		}
-
-		// for r := 1; r < R; r++ {
-		// 	t1 := t0 + P*r
-		// 	text[t1] = text[t1] + 1
-		// 	// t2 := min(T, t0+P*r)
-		// 	// if t2 < t1 {
-		// 	// 	panic("t2 < t1")
-		// 	// }
-		// 	// if t2 <= t1 {
-		// 	// 	break
-		// 	// }
-		// 	// var j int
-		// 	// if t2-t1 == 1 {
-		// 	// 	j = 0
-		// 	// } else {
-		// 	// 	j = int(rand.Int31n(int32(t2-t1) - 1))
-		// 	// }
-
-		// 	// //k := 1 + byte(rand.Int31n(0xFE))
-		// 	// text[t1+j]++ // += k
-		// }
 	}
 
 	return pattern, text
@@ -100,19 +83,19 @@ const MAX_TIME = 10
 
 func test_sa_speed(T int, // size of text
 	P int, // size of pattern.
-	R int, // 1 / R = fraction of text made up of pattern repetitions
+	N int, // number of occurrences of pattern in text
 ) (float64, float64) {
 
-	M := int(T / (P * R))
-	fmt.Printf("Test suffix array speed: T=%v, P=%v, R=%v, M=%v, P*R*M=%v, Δ=%v\n",
-		T, P, R, M, P*R*M, T-P*R*M)
+	M := int(T / P)
+	fmt.Printf("Test suffix array speed: T=%v, P=%v, N=%v, M=%v\n",
+		T, P, N, M)
 	if M <= 0 {
 		panic("M must be greater than zero")
 	}
 
 	// text:  String to be indexed and searched
 	// pattern:  Substring to search for
-	pattern, text := make_pattern_text(T, P, R)
+	pattern, text := make_pattern_text(T, P, N)
 
 	var (
 		count int
@@ -133,13 +116,17 @@ func test_sa_speed(T int, // size of text
 	// 	count, time.Since(start).Seconds(), duration_index)
 
 	// matches := []int{} // number of pattern matches
+	n_matches := 0
 	count = 0
+
 	for start = time.Now(); time.Since(start).Seconds() < MAX_TIME; {
 		offsets := text_index.Lookup(pattern, -1)
-		if len(offsets) != M {
-			panic(fmt.Sprintf("%d matched, expected %d, count=%d", len(offsets), M, count))
+		if len(offsets) != N {
+			panic(fmt.Sprintf("%d matched, expected %d, count=%d", len(offsets), N, count))
 		}
 		// matches = append(matches, len(offsets))
+
+		n_matches += N
 		count++
 	}
 	if count < 1 {
@@ -155,17 +142,21 @@ func test_sa_speed(T int, // size of text
 	// 	panic("matches")
 	// }
 
-	// duration_match := duration_lookup_total / float64(n_matches) // Duration per pattern match
-	// duration_char := duration_match / float64(P)
+	duration_match := duration_lookup_total / float64(n_matches) // Duration per pattern match
+	duration_char := duration_match / float64(P)
 
-	// fmt.Printf(" %7d %e %e : %e %e\n", n_matches, duration_index, duration_lookup,
-	// 	duration_match, duration_char)
+	fmt.Printf(" %7d %e %e : %e %e\n", n_matches, duration_index, duration_lookup,
+		duration_match, duration_char)
 
 	return duration_index, duration_lookup
 }
 
-func write_results(results [][]float64) {
-	w := csv.NewWriter(os.Stdout)
+func write_results(name string, results [][]float64) {
+	f, err := os.Create(name)
+	if err != nil {
+		log.Fatalln("error opening '%s' %v", name, err)
+	}
+	w := csv.NewWriter(f)
 	if err := w.Write([]string{"T", "P", "index", "lookup"}); err != nil {
 		log.Fatalln("error writing record to csv:", err)
 	}
@@ -186,29 +177,30 @@ func write_results(results [][]float64) {
 	if err := w.Error(); err != nil {
 		log.Fatal(err)
 	}
+	fmt.Printf("Wrote '%s'\n", name)
 }
 
 func main() {
-	R := 2
+	N := 100
 	T_MAX := 10 * 1000 * 1000
 	// T_MAX := 1000
 
 	results_P := [][]float64{}
-	for P := 1; P*R <= T_MAX; P *= 2 {
+	for P := 1; P*N <= T_MAX; P *= 2 {
 		T := T_MAX
-		duration_index, duration_lookup := test_sa_speed(T, P, R)
+		duration_index, duration_lookup := test_sa_speed(T, P, N)
 		results_P = append(results_P,
 			[]float64{float64(T), float64(P), duration_index, duration_lookup})
 	}
 
 	P := 100
 	results_T := [][]float64{}
-	for T := P * R; T <= T_MAX; T *= 2 {
-		duration_index, duration_lookup := test_sa_speed(T, P, R)
+	for T := P * N; T <= T_MAX; T *= 2 {
+		duration_index, duration_lookup := test_sa_speed(T, P, N)
 		results_T = append(results_T,
 			[]float64{float64(T), float64(P), duration_index, duration_lookup})
 	}
 
-	write_results(results_P)
-	write_results(results_T)
+	write_results("results-p.csv", results_P)
+	write_results("results-t.csv", results_T)
 }
