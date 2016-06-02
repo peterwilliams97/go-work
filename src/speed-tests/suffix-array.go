@@ -32,6 +32,13 @@ func min(a, b int) int {
 	return b
 }
 
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // T int, // size of text
 // P int, // size of pattern.
 func make_pattern_text(T int, // size of text
@@ -186,21 +193,20 @@ func main() {
 	// T_MAX := 1000
 
 	results_P := [][]float64{}
-	for P := 1; P*N <= T_MAX; P *= 2 {
+	for P := 1; P*N <= T_MAX; P = max(P+1, int(float64(P)*1.1)) {
 		T := T_MAX
 		duration_index, duration_lookup := test_sa_speed(T, P, N)
 		results_P = append(results_P,
 			[]float64{float64(T), float64(P), duration_index, duration_lookup})
 	}
+	write_results("results-p.csv", results_P)
 
 	P := 100
 	results_T := [][]float64{}
-	for T := P * N; T <= T_MAX; T *= 2 {
+	for T := P * N; T <= T_MAX; T = max(T+1, int(float64(T)*1.1)) {
 		duration_index, duration_lookup := test_sa_speed(T, P, N)
 		results_T = append(results_T,
 			[]float64{float64(T), float64(P), duration_index, duration_lookup})
 	}
-
-	write_results("results-p.csv", results_P)
 	write_results("results-t.csv", results_T)
 }
